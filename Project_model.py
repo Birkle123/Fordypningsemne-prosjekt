@@ -16,9 +16,9 @@ Vmax = 4.5
 Qmax = 100.0
 Pmax = 86.5
 alpha = 3.6/1000.0
-eta = 0.657 * 3.6
+E = 0.000657 * 3.6
 WV_end = 52600.0
-q_cap = min(Qmax, Pmax/eta)
+q_cap = min(Qmax, Pmax/E)
 
 # Price profile (same for all scenarios)
 pi = {t: 50.0 + (t+1) for t in range(1,T+1)}
