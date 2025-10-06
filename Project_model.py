@@ -149,7 +149,7 @@ m_stoch = build_stochastic_model()
 solver.solve(m_stoch)
 
 
-
+#hei
 
 # After solving EV model:
 print("EV objective:", pyo.value(m_ev.obj))
