@@ -123,7 +123,7 @@ def build_stochastic_model():
         return first + second
     m.obj = pyo.Objective(rule=obj, sense=pyo.maximize)
 
-    # ✅ Return model
+    #Return model
     return m
 
 
