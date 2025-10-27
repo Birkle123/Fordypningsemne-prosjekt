@@ -96,16 +96,21 @@ sub = pyo.ConcreteModel()
 sub.T = pyo.RangeSet(T1+1, T)
 sub.S = pyo.Set(initialize=scenarios)
 
-# Variables
-sub.q = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, q_cap)) # Discharge [m3/s]
-sub.V = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax)) # Reservoir volume [Mm3]
+# Variables with initialization
+sub.q = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, q_cap), initialize=0.0) # Discharge [m3/s]
+sub.V = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax), initialize=V0) # Reservoir volume [Mm3]
 
 # Suffix to capture dual values
 sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
-# Reservoir balance constraint
+# Reservoir balance constraint for linking with master problem
 def V25_rule(m, s):
-    return m.V[T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
+    new_volume = V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
+    # Add feasibility check print
+    if new_volume < 0 or new_volume > Vmax:
+        print(f"Warning: V25 constraint for scenario {s} leads to infeasible volume: {new_volume}")
+        print(f"Components: V24_fixed={V24_fixed}, inflow={alpha * I[s, T1+1]}, discharge={alpha * m.q[T1+1]}")
+    return m.V[T1+1] == new_volume
 sub.V25 = pyo.Constraint(sub.S, rule=V25_rule)
 
 # Reservoir balance constraint
@@ -159,6 +164,16 @@ while abs(upper_bounds - lower_bounds) > tolerance:
     # Solve subproblems for each scenario
     for s in scenarios:
         sub_result = opt.solve(sub)
+        
+        if sub_result.solver.termination_condition != pyo.TerminationCondition.optimal:
+            print(f"Subproblem for scenario '{s}' failed to solve optimally.")
+            print(f"Status: {sub_result.solver.termination_condition}")
+            print(f"V24_fixed value: {V24_fixed}")
+            print(f"Checking V25 constraint:")
+            print(f"V[T1+1] bound: (0, {Vmax})")
+            print(f"Current inflow I[{s}, {T1+1}]: {I[s, T1+1]}")
+            break
+            
         sub_obj_value = pyo.value(sub.obj)
         expected_sub_obj += prob[s] * sub_obj_value
         
