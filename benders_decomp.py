@@ -48,7 +48,72 @@ for s in scenarios:
         else:
             I[s, t] = scenario_inflows[s]
 
-def master_obj():
+# Expected inflow
+I_exp = {
+    t: (50.0 if t <= T1 else sum(scenario_inflows.values()) / len(scenarios))
+    for t in range(1, T + 1)
+}
 
-    return model
+# Global variable to hold fixed V24 from master problem
+V24_fixed = {}
 
+# --- Master Problem ---
+
+# Create master problem
+master = pyo.ConcreteModel()
+
+# Sets
+master.T = pyo.RangeSet(1, T1)
+
+# Variables
+master.q = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, q_cap)) # Discharge [m3/s]
+master.V = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, Vmax)) # Reservoir volume [Mm3]
+master.theta = pyo.Var(within=pyo.Reals) # Approximation of expected future cost
+
+# Reservoir balance constraint
+def master_res_rule(m, t):
+    if t == 1:
+        return m.V[t] == V0 + alpha * I_exp[t] - alpha * m.q[t]
+    else:
+        return m.V[t] == m.V[t-1] + alpha * I_exp[t] - alpha * m.q[t]
+
+# Connect constraint to model
+master.res_balance = pyo.Constraint(master.T, rule=master_res_rule)
+
+# Objective function
+def master_obj_rule(m):
+    return sum(pi[t] * E_conv * m.q[t] for t in m.T) + m.theta
+
+# Connect objective to model
+master.obj = pyo.Objective(rule=master_obj_rule, sense=pyo.maximize)
+
+# --- Subproblem ---
+
+# Create subproblem
+sub = pyo.ConcreteModel()
+
+# Sets
+sub.T = pyo.RangeSet(T1+1, T)
+sub.S = pyo.Set(initialize=scenarios)
+
+# Variables
+sub.q = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, q_cap)) # Discharge [m3/s]
+sub.V = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax)) # Reservoir volume [Mm3]
+
+# Suffix to capture dual values
+sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
+
+# Reservoir balance constraint
+def V25_rule(m):
+    return m.V[T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
+sub.V25 = pyo.Constraint(rule=V25_rule)
+
+def sub_res_rule(m, t):
+    if t == T1 + 1:
+        return pyo.Constraint.Skip
+    return m.V[t] == m.V[t-1] + alpha * (I[s][t] - alpha * m.q[t])
+sub.res_balance = pyo.Constraint(sub.T, rule=sub_res_rule)
+
+# Objective function
+def sub_obj_rule(m, s):
+    return sum(pi[t] * E_conv * m.q[t] for t in m.T) + (WV_end * m.V[T] if T in m.T else 0)
