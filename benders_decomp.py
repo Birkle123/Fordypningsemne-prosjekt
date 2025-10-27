@@ -107,6 +107,10 @@ sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 def V25_rule(m, s):
     print(f"Creating V25 constraint for scenario {s}")
     print(f"V24_fixed={V24_fixed}, inflow={alpha * I[s, T1+1]}")
+    # Calculate max feasible discharge to maintain non-negative volume
+    max_feasible_discharge = (V24_fixed + alpha * I[s, T1+1]) / alpha
+    # Update the upper bound of q[T1+1] for this scenario
+    m.q[T1+1].setub(min(q_cap, max_feasible_discharge))
     return m.V[T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
 sub.V25 = pyo.Constraint(sub.S, rule=V25_rule)
 
@@ -186,17 +190,28 @@ while abs(upper_bounds - lower_bounds) > tolerance:
     
     # Update bounds
     lower_bound = master_obj_value
-    upper_bound = sum(pyo.value(master.obj) - master_theta + expected_sub_obj)
+    upper_bound = pyo.value(master.obj) - master_theta + expected_sub_obj
     
-    upper_bound_list.append(upper_bounds)
-    lower_bound_list.append(lower_bounds)
+    upper_bound_list.append(upper_bound)
+    lower_bound_list.append(lower_bound)
     
-    print(f" Lower Bound: {lower_bounds}, Upper Bound: {upper_bounds}")
+    print(f"Updated bounds - Lower: {lower_bound}, Upper: {upper_bound}")
     
-    # Add Benders cut to master problem
-    def benders_cut_rule(m):
-        return m.theta <= sum(prob[s] * (duals_V25[i] * (m.V[T1] - V24_fixed) + expected_sub_obj) for i, s in enumerate(scenarios))
+    # print current convergence tracking values (use the lists' last entries)
+    print(f" Lower Bound list last: {lower_bound_list[-1]}, Upper Bound list last: {upper_bound_list[-1]}")
     
-    master.BendersCut = pyo.Constraint(rule=benders_cut_rule)
+    # If any subproblem failed, duals_V25 will be shorter than scenarios.
+    if len(duals_V25) != len(scenarios):
+        print("One or more subproblems infeasible; adding feasibility cut on master and skipping Benders cut for this iteration.")
+        # Add a simple feasibility cut preventing the master from choosing the same V24 next time
+        # Use a small epsilon to avoid numerical equality
+        eps = 1e-6
+        cut_name = f"FeasibilityCut_{iteration}"
+        setattr(master, cut_name, pyo.Constraint(expr=master.V[T1] <= master_V24 - eps))
+    else:
+        # Add Benders cut to master problem (expected_sub_obj added once, not inside sum)
+        def benders_cut_rule(m):
+            return m.theta <= sum(prob[s] * duals_V25[i] * (m.V[T1] - V24_fixed) for i, s in enumerate(scenarios)) + expected_sub_obj
+        master.BendersCut = pyo.Constraint(rule=benders_cut_rule)
     
     iteration += 1
