@@ -96,35 +96,36 @@ sub = pyo.ConcreteModel()
 sub.T = pyo.RangeSet(T1+1, T)
 sub.S = pyo.Set(initialize=scenarios)
 
-# Variables with initialization
-sub.q = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, q_cap), initialize=0.0) # Discharge [m3/s]
-sub.V = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax), initialize=V0) # Reservoir volume [Mm3]
+# Variables with initialization (indexed by scenario and time)
+sub.q = pyo.Var(sub.S, sub.T, within=pyo.NonNegativeReals, bounds=(0, q_cap), initialize=0.0) # Discharge [m3/s]
+sub.V = pyo.Var(sub.S, sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax), initialize=V0) # Reservoir volume [Mm3]
 
 # Suffix to capture dual values
 sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
 # Reservoir balance constraint for linking with master problem
+# V25 linking constraint (per scenario)
 def V25_rule(m, s):
     print(f"Creating V25 constraint for scenario {s}")
     print(f"V24_fixed={V24_fixed}, inflow={alpha * I[s, T1+1]}")
     # Calculate max feasible discharge to maintain non-negative volume
     max_feasible_discharge = (V24_fixed + alpha * I[s, T1+1]) / alpha
-    # Update the upper bound of q[T1+1] for this scenario
-    m.q[T1+1].setub(min(q_cap, max_feasible_discharge))
-    return m.V[T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
+    # Update the upper bound of q[s, T1+1] for this scenario
+    m.q[s, T1+1].setub(min(q_cap, max_feasible_discharge))
+    return m.V[s, T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[s, T1+1]
 sub.V25 = pyo.Constraint(sub.S, rule=V25_rule)
 
 # Reservoir balance constraint
 def sub_res_rule(m, s, t):
     if t == T1 + 1:
         return pyo.Constraint.Skip
-    return m.V[t] == m.V[t-1] + alpha * I[s, t] - alpha * m.q[t]
+    return m.V[s, t] == m.V[s, t-1] + alpha * I[s, t] - alpha * m.q[s, t]
 sub.res_balance = pyo.Constraint(sub.S, sub.T, rule=sub_res_rule)
 
 # Objective function
 def sub_obj_rule(m, s):
-    return sum(pi[t] * E_conv * m.q[t] for t in m.T) + (WV_end * m.V[T] if T in m.T else 0)
-sub.obj = pyo.Objective(rule=sub_obj_rule, sense=pyo.maximize)
+    return sum(pi[t] * E_conv * m.q[s, t] for t in m.T) + (WV_end * m.V[s, T] if T in m.T else 0)
+sub.obj = pyo.Objective(sub.S, rule=sub_obj_rule, sense=pyo.maximize)
 
 # --- Benders Decomposition Functions ---
 
