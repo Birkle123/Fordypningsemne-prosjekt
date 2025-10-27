@@ -55,7 +55,7 @@ I_exp = {
 }
 
 # Global variable to hold fixed V24 from master problem
-V24_fixed = {}
+V24_fixed = 0.0  # Initialize to 0.0
 
 # --- Master Problem ---
 
