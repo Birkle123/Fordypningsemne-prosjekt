@@ -66,9 +66,9 @@ master = pyo.ConcreteModel()
 master.T = pyo.RangeSet(1, T1)
 
 # Variables
-master.q = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, q_cap)) # Discharge [m3/s]
-master.V = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, Vmax)) # Reservoir volume [Mm3]
-master.theta = pyo.Var(within=pyo.Reals) # Approximation of expected future cost
+master.q = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, q_cap), initialize=0.0) # Discharge [m3/s]
+master.V = pyo.Var(master.T, within=pyo.NonNegativeReals, bounds=(0, Vmax), initialize=V0) # Reservoir volume [Mm3]
+master.theta = pyo.Var(within=pyo.Reals, bounds=(-1e6, 1e6), initialize=0.0) # Approximation of expected future cost with bounds
 
 # Reservoir balance constraint
 def master_res_rule(m, t):
@@ -138,6 +138,11 @@ while abs(upper_bounds - lower_bounds) > tolerance:
     
     # Solve master problem
     master_result = opt.solve(master)
+    
+    if master_result.solver.termination_condition != pyo.TerminationCondition.optimal:
+        print(f"Master problem failed to solve optimally. Status: {master_result.solver.termination_condition}")
+        break
+        
     master_V24 = pyo.value(master.V[T1])
     master_theta = pyo.value(master.theta)
     master_obj_value = pyo.value(master.obj)
