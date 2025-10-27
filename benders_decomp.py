@@ -122,7 +122,7 @@ sub.obj = pyo.Objective(rule=sub_obj_rule, sense=pyo.maximize)
 
 # --- Benders Decomposition Functions ---
 
-opt = pyo.SolverFactory("gruobi")
+opt = pyo.SolverFactory("gurobi")
 cut_counter = 1
 upper_bounds = float('inf')
 lower_bounds = -float('inf')
@@ -133,7 +133,7 @@ iteration = 1
 upper_bound_list = []
 lower_bound_list = []
 
-while abs(upper_bound - lower_bound) > tolerance:
+while abs(upper_bounds - lower_bounds) > tolerance:
     print(f"--- Benders Iteration {iteration} ---")
     
     # Solve master problem
@@ -167,10 +167,10 @@ while abs(upper_bound - lower_bound) > tolerance:
     lower_bound = master_obj_value
     upper_bound = sum(pyo.value(master.obj) - master_theta + expected_sub_obj)
     
-    upper_bound_list.append(upper_bound)
-    lower_bound_list.append(lower_bound)
+    upper_bound_list.append(upper_bounds)
+    lower_bound_list.append(lower_bounds)
     
-    print(f" Lower Bound: {lower_bound}, Upper Bound: {upper_bound}")
+    print(f" Lower Bound: {lower_bounds}, Upper Bound: {upper_bounds}")
     
     # Add Benders cut to master problem
     def benders_cut_rule(m):
