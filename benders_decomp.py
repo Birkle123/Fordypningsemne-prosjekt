@@ -221,11 +221,17 @@ while abs(upper_bounds - lower_bounds) > tolerance:
     # If any subproblem failed, duals_V25 will be shorter than scenarios.
     if len(duals_V25) != len(scenarios):
         print("One or more subproblems infeasible; adding feasibility cut on master and skipping Benders cut for this iteration.")
-        # Add a simple feasibility cut preventing the master from choosing the same V24 next time
-        # Use a small epsilon to avoid numerical equality
-        eps = 1e-6
+        # Derive a necessary feasibility condition for V24 for the failing scenario(s)
+        # For the V25 constraint: V25 = V24 + alpha*I - alpha*q with q in [0,q_cap].
+        # The achievable V25 interval is [V24 + alpha*I - alpha*q_cap, V24 + alpha*I]. For feasibility we need this interval
+        # to intersect [0, Vmax]. A necessary condition is:
+        #   V24 + alpha*I - alpha*q_cap <= Vmax  => V24 <= Vmax - alpha*I + alpha*q_cap
+        # We'll add this as a cut using the inflow from the first infeasible scenario encountered (last 's' in loop).
+        infeasible_s = s
+        feasible_upper = Vmax - alpha * I[infeasible_s, T1+1] + alpha * q_cap
         cut_name = f"FeasibilityCut_{iteration}"
-        setattr(master, cut_name, pyo.Constraint(expr=master.V[T1] <= master_V24 - eps))
+        setattr(master, cut_name, pyo.Constraint(expr=master.V[T1] <= feasible_upper))
+        print(f"Added feasibility cut: master.V[{T1}] <= {feasible_upper} (from scenario {infeasible_s})")
     else:
         # Add Benders cut to master problem (expected_sub_obj added once, not inside sum)
         def benders_cut_rule(m):
