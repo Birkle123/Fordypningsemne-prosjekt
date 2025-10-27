@@ -103,16 +103,20 @@ sub.V = pyo.Var(sub.S, sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax), ini
 # Suffix to capture dual values
 sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
+# Mutable parameter to receive V24 from master
+sub.V24 = pyo.Param(initialize=V24_fixed, mutable=True)
+
 # Reservoir balance constraint for linking with master problem
 # V25 linking constraint (per scenario)
 def V25_rule(m, s):
+    # Use mutable Param m.V24 so we can update it each iteration
     print(f"Creating V25 constraint for scenario {s}")
-    print(f"V24_fixed={V24_fixed}, inflow={alpha * I[s, T1+1]}")
+    print(f"V24={m.V24}, inflow={alpha * I[s, T1+1]}")
     # Calculate max feasible discharge to maintain non-negative volume
-    max_feasible_discharge = (V24_fixed + alpha * I[s, T1+1]) / alpha
+    max_feasible_discharge = (pyo.value(m.V24) + alpha * I[s, T1+1]) / alpha
     # Update the upper bound of q[s, T1+1] for this scenario
     m.q[s, T1+1].setub(min(q_cap, max_feasible_discharge))
-    return m.V[s, T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[s, T1+1]
+    return m.V[s, T1+1] == m.V24 + alpha * I[s, T1+1] - alpha * m.q[s, T1+1]
 sub.V25 = pyo.Constraint(sub.S, rule=V25_rule)
 
 # Reservoir balance constraint
@@ -166,8 +170,18 @@ while abs(upper_bounds - lower_bounds) > tolerance:
     # Solve subproblems for each scenario
     for s in scenarios:
         print(f"\nSolving subproblem for scenario {s}")
+        # update V24 in the subproblem (mutable Param)
+        sub.V24.set_value(master_V24)
+        # activate only the objective for scenario s
+        for obj in sub.obj.values():
+            try:
+                obj.deactivate()
+            except Exception:
+                pass
+        sub.obj[s].activate()
+
         sub_result = opt.solve(sub)
-        
+
         if sub_result.solver.termination_condition != pyo.TerminationCondition.optimal:
             print(f"Subproblem for scenario '{s}' failed to solve optimally.")
             print(f"Status: {sub_result.solver.termination_condition}")
@@ -179,14 +193,17 @@ while abs(upper_bounds - lower_bounds) > tolerance:
             sub.write(f"subproblem_{s}.lp", io_options={'symbolic_solver_labels': True})
             print(f"Wrote problem to subproblem_{s}.lp for inspection")
             break
-            
-        sub_obj_value = pyo.value(sub.obj)
+
+        sub_obj_value = pyo.value(sub.obj[s])
         expected_sub_obj += prob[s] * sub_obj_value
-        
-        # Get dual value for V25 constraint
-        dual_value = sub.dual[sub.V25]
+
+        # Get dual value for V25 constraint for this scenario
+        try:
+            dual_value = sub.dual[sub.V25[s]]
+        except Exception:
+            dual_value = None
         duals_V25.append(dual_value)
-        
+
         print(f" Subproblem '{s}' Objective: {sub_obj_value}, Dual V25: {dual_value}")
     
     # Update bounds
