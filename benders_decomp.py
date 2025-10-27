@@ -112,7 +112,7 @@ sub.V25 = pyo.Constraint(rule=V25_rule)
 def sub_res_rule(m, t):
     if t == T1 + 1:
         return pyo.Constraint.Skip
-    return m.V[t] == m.V[t-1] + alpha * I[s][t] - alpha * m.q[t]
+    return m.V[t] == m.V[t-1] + alpha * I[s, t] - alpha * m.q[t]
 sub.res_balance = pyo.Constraint(sub.T, rule=sub_res_rule)
 
 # Objective function
