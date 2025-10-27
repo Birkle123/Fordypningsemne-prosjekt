@@ -104,16 +104,16 @@ sub.V = pyo.Var(sub.T, within=pyo.NonNegativeReals, bounds=(0, Vmax)) # Reservoi
 sub.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
 
 # Reservoir balance constraint
-def V25_rule(m):
+def V25_rule(m, s):
     return m.V[T1+1] == V24_fixed + alpha * I[s, T1+1] - alpha * m.q[T1+1]
-sub.V25 = pyo.Constraint(rule=V25_rule)
+sub.V25 = pyo.Constraint(sub.S, rule=V25_rule)
 
 # Reservoir balance constraint
-def sub_res_rule(m, t):
+def sub_res_rule(m, s, t):
     if t == T1 + 1:
         return pyo.Constraint.Skip
     return m.V[t] == m.V[t-1] + alpha * I[s, t] - alpha * m.q[t]
-sub.res_balance = pyo.Constraint(sub.T, rule=sub_res_rule)
+sub.res_balance = pyo.Constraint(sub.S, sub.T, rule=sub_res_rule)
 
 # Objective function
 def sub_obj_rule(m, s):
