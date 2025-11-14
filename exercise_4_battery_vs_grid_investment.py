@@ -617,13 +617,13 @@ def plot_optimization_results(model, Hours, Base_load, PV_prod, Price, capacity,
     total_excess_cost = np.sum(Grid_excess_arr * penalty_cost)
     
     if len(excess_hours) > 0:
-        print("\n🚨 EXCESS COST ACTIVATED! 🚨")
+        print("\n EXCESS COST ACTIVATED")
         print(f"Hours when penalty cost applied: {list(excess_hours)}")
         print(f"Excess amounts (MW): {Grid_excess_arr[Grid_excess_arr > 0.001]}")
         print(f"Total excess cost: {total_excess_cost:.2f} currency units")
         print(f"Penalty cost per MW: {penalty_cost} currency units/MW")
     else:
-        print("\n✅ No excess cost activated - stayed within grid limits!")
+        print("\n No excess cost activated - stayed within grid limits!")
         print(f"Penalty cost available but not needed: {penalty_cost} currency units/MW")
     
     print("="*50)
