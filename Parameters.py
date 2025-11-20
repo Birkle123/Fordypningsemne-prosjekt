@@ -1,38 +1,42 @@
+"""
+Centralized Parameters Module
+
+This module imports all parameters from the centralized configuration system.
+Use this for backward compatibility or when you need all parameters imported.
+
+For new code, consider importing directly from config:
+    from config import config
+    # Then use config.T, config.V0, etc.
+"""
+
 import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
 
+# Import all parameters from centralized config
+from config import (
+    config,  # The main config object
+    T, T1,   # Time parameters
+    V0, Vmax, Qmax, Pmax, E_conv, alpha,  # Physical parameters  
+    WV_end, spillage_cost,  # Economic parameters
+    pi, scenario_info, scenarios, prob, q_cap  # Derived parameters
+)
 
-# --- Parameters ---
-T = 48
-T1 = 24
+# For convenience, also expose computed properties
+P_full_discharge = config.P_full_discharge
+Qmax_from_P = config.Qmax_from_P
 
-# Reservoir & turbine parameters
-V0 = 3.0 #Mm3
-Vmax = 4.5 #Mm3
-Qmax = 100.0 #m3/s
-Pmax = 86.5 #MW
-alpha = 3.6/1000.0 #Conversion factor from flow (m³/s) over one hour to million cubic meters (Mm³)
-E_conv = 0.657 #Energy [kWh] generated per cubic meter of discharged water.
-WV_end = 52600.0
-
-P_full_discharge = E_conv * Qmax * 3600 / 1000
-Qmax_from_P = Qmax * (Pmax / P_full_discharge)
-# kWh/m3 * m3/s * 3600s/h = kWh (3600 * E_conv * m.q[t] * 1000)
-q_cap = min(Qmax, Qmax_from_P)  # Max discharge limited by both physical and power constraints
-
-# Price profile (same for all scenarios)
-pi = {t: 50.0 + (t+1) for t in range(1,T+1)}
-
-# --- Scenario definitions with names ---
-scenario_info = {
-    "Very Dry": 0,
-    "Dry": 10,
-    "Normal": 20,
-    "Wet": 30,
-    "Very Wet": 40,
-}
-
-scenarios = list(scenario_info.keys())
-prob = {s: 1.0 / len(scenarios) for s in scenarios}
+# Print configuration summary when imported
+if __name__ == "__main__":
+    print("=" * 50)
+    print("PARAMETER SUMMARY")
+    print("=" * 50)
+    print(config.summary())
+    print(f"\nDerived parameters:")
+    print(f"q_cap = {q_cap:.2f} m³/s")
+    print(f"P_full_discharge = {P_full_discharge:.2f} MW")
+    print(f"Qmax_from_P = {Qmax_from_P:.2f} m³/s")
+    print("\nScenario details:")
+    for name, inflow in scenario_info.items():
+        print(f"  {name}: {inflow} m³/s (prob: {prob[name]:.2f})")

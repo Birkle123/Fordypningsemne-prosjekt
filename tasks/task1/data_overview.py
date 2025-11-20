@@ -8,7 +8,7 @@ def plot_scenario_data():
     Creates a comprehensive visualization showing both price evolution and inflow scenarios.
     """
     # Load the data
-    df = pd.read_csv('scenario_data.csv')
+    df = pd.read_csv('tasks/task1/scenario_data.csv')
     
     # Create figure with subplots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))

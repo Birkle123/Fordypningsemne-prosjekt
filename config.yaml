@@ -1,0 +1,39 @@
+# Time parameters
+time:
+  T: 48              # Total time periods
+  T1: 24             # First stage periods
+
+# Physical parameters
+reservoir:
+  V0: 3.0            # Initial volume (Mm³)
+  Vmax: 4.5          # Maximum volume (Mm³)
+  
+turbine:
+  Qmax: 100.0        # Maximum discharge (m³/s)
+  Pmax: 86.5         # Maximum power (MW)
+  E_conv: 0.657      # Energy conversion factor (kWh/m³)
+  
+# Conversion factors
+conversion:
+  alpha: 0.0036      # Flow to volume conversion (Mm³ per (m³/s·hour))
+  
+# Economic parameters
+economics:
+  WV_end: 52600.0    # Water value at end (NOK/Mm³)
+  spillage_cost: 52600.0  # Cost of spillage (NOK/Mm³)
+  base_price: 50.0   # Base electricity price (NOK/MWh)
+  
+# Scenario parameters
+scenarios:
+  names: ["Very Dry", "Dry", "Normal", "Wet", "Very Wet"]
+  inflows: [0, 10, 20, 30, 40]  # Inflow values for each scenario (m³/s)
+  probabilities: [0.2, 0.2, 0.2, 0.2, 0.2]  # Equal probability
+  certain_inflow: 50.0  # Inflow for first T1 periods (m³/s)
+  
+# Solver settings
+solver:
+  name: "gurobi"
+  options:
+    MIPGap: 1e-6
+    TimeLimit: 300
+    Presolve: 2
