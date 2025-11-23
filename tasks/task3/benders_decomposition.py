@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import time
 from config import config
 
@@ -260,13 +261,19 @@ def run_benders_decomposition(plot=True, summary=True):
             benders_q.append(pyo.value(master.q[t]))
             benders_V.append(pyo.value(master.V[t]))
         
-        # Second stage solution (expected values across scenarios)
+        # Scenario-specific second stage solution & expected values
+        scenario_q = {s: [] for s in config.scenarios}
+        scenario_V = {s: [] for s in config.scenarios}
         for t in range(config.T1 + 1, config.T + 1):
-            expected_q = 0
-            expected_V = 0
+            expected_q = 0.0
+            expected_V = 0.0
             for s in config.scenarios:
-                expected_q += config.prob[s] * pyo.value(subproblem.q[s, t])
-                expected_V += config.prob[s] * pyo.value(subproblem.V[s, t])
+                val_q = pyo.value(subproblem.q[s, t])
+                val_V = pyo.value(subproblem.V[s, t])
+                scenario_q[s].append(val_q)
+                scenario_V[s].append(val_V)
+                expected_q += config.prob[s] * val_q
+                expected_V += config.prob[s] * val_V
             benders_q.append(expected_q)
             benders_V.append(expected_V)
         
@@ -274,10 +281,17 @@ def run_benders_decomposition(plot=True, summary=True):
         ax = plt.gca()
         ax2 = ax.twinx()
         
-        lq, = ax.plot(hours_q, benders_q, color='purple', linewidth=2, label='Discharge q (Benders)')
-        lV, = ax2.plot(hours_V, benders_V, color='purple', linestyle='--', linewidth=2, label='Reservoir V (Benders)', zorder=3)
+        lq, = ax.plot(hours_q, benders_q, color='purple', linewidth=2, label='Discharge q (expected)')
+        lV, = ax2.plot(hours_V, benders_V, color='purple', linestyle='--', linewidth=2, label='Reservoir V (expected)', zorder=3)
+
+        # Scenario thin lines (second stage only, unlabeled)
+        hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        for s, series in scenario_q.items():
+            ax.plot(hours_stage2, series, color='purple', alpha=0.4, linewidth=1.0)
+        for s, series in scenario_V.items():
+            ax2.plot(hours_stage2, series, color='orange', alpha=0.4, linewidth=1.0)
         
-        ax.set_title('Benders Decomposition — first stage exact; second stage expected', fontweight='bold')
+        ax.set_title('Benders Decomposition — first stage exact; expected & scenario lines on second stage', fontweight='bold')
         ax.set_xlabel('Hour')
         ax.set_ylabel('Discharge q (m³/s)')
         ax2.set_ylabel('Reservoir Level V (Mm³)')
@@ -285,7 +299,14 @@ def run_benders_decomposition(plot=True, summary=True):
         ax.set_xlim(0, config.T)
         ax.axvline(x=config.T1, color='gray', linestyle=':', alpha=0.7, label='End of first stage')
         
-        ax.legend(handles=[lq, lV], loc='upper left')
+        # Combined legend bottom-left with scenario explanation
+        handles_ax, labels_ax = ax.get_legend_handles_labels()
+        handles_ax2, labels_ax2 = ax2.get_legend_handles_labels()
+        scenario_proxy = Line2D([0], [0], color='gray', linewidth=1.0, alpha=0.6,
+                     label='Scenario trajectories (thin lines)')
+        all_handles = handles_ax + handles_ax2 + [scenario_proxy]
+        all_labels = labels_ax + labels_ax2 + [scenario_proxy.get_label()]
+        ax.legend(all_handles, all_labels, loc='lower left')
         plt.tight_layout()
         plt.show()
     

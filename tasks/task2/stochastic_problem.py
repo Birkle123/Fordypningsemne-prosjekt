@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import time
 from config import config
 
@@ -104,42 +105,68 @@ def run_stochastic_problem(plot=True, summary=True):
         print("="*80)
     
     if plot:
-        # Create visualization with expected values for second stage
+        # Create visualization with expected values and scenario lines for second stage
         hours_q = list(range(1, config.T + 1))
         hours_V = [0] + hours_q
-        
+
         # Combine first stage (exact) with second stage (expected)
         stoch_q = []
         stoch_V = [config.V0]
-        
-        # First stage
+
+        # First stage exact trajectories
         for t in range(1, config.T1 + 1):
             stoch_q.append(pyo.value(m_stoch.q1[t]))
             stoch_V.append(pyo.value(m_stoch.V1[t]))
-        
-        # Second stage (expected values)
+
+        # Scenario-specific second-stage trajectories
+        scenario_q = {s: [] for s in config.scenarios}
+        scenario_V = {s: [] for s in config.scenarios}
+
+        # Second stage expected + collect scenario raw values
         for t in range(config.T1 + 1, config.T + 1):
-            expected_q = sum(config.prob[s] * pyo.value(m_stoch.q2[s, t]) for s in config.scenarios)
-            expected_V = sum(config.prob[s] * pyo.value(m_stoch.V2[s, t]) for s in config.scenarios)
+            expected_q = 0.0
+            expected_V = 0.0
+            for s in config.scenarios:
+                val_q = pyo.value(m_stoch.q2[s, t])
+                val_V = pyo.value(m_stoch.V2[s, t])
+                scenario_q[s].append(val_q)
+                scenario_V[s].append(val_V)
+                expected_q += config.prob[s] * val_q
+                expected_V += config.prob[s] * val_V
             stoch_q.append(expected_q)
             stoch_V.append(expected_V)
-        
+
         plt.figure(figsize=(11, 4.5))
         ax = plt.gca()
         ax2 = ax.twinx()
-        
-        lq, = ax.plot(hours_q, stoch_q, color='green', linewidth=2, label='Discharge q (Stochastic)')
-        lV, = ax2.plot(hours_V, stoch_V, color='green', linestyle='--', linewidth=2, label='Reservoir V (Stochastic)', zorder=3)
-        
-        ax.set_title('Two-Stage Stochastic Model — shared first stage; expected values on day 2', fontweight='bold')
+
+        # Expected lines
+        lq, = ax.plot(hours_q, stoch_q, color='green', linewidth=2, label='Discharge q (expected)')
+        lV, = ax2.plot(hours_V, stoch_V, color='green', linestyle='--', linewidth=2, label='Reservoir V (expected)', zorder=3)
+
+        # Scenario thin lines (second stage only, no individual legend labels)
+        hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        for s, series in scenario_q.items():
+            ax.plot(hours_stage2, series, color='green', alpha=0.4, linewidth=1.0)
+        for s, series in scenario_V.items():
+            ax2.plot(hours_stage2, series, color='orange', alpha=0.4, linewidth=1.0)
+
+        ax.set_title('Two-Stage Stochastic Model — shared first stage; expected & scenario lines on day 2', fontweight='bold')
         ax.set_xlabel('Hour')
         ax.set_ylabel('Discharge q (m³/s)')
         ax2.set_ylabel('Reservoir Level V (Mm³)')
         ax.grid(True, linewidth=0.5, alpha=0.6)
         ax.set_xlim(0, config.T)
         ax.axvline(x=config.T1, color='gray', linestyle=':', alpha=0.7, label='End of first stage')
-        
-        ax.legend(handles=[lq, lV], loc='upper left')
+
+        # Build combined legend bottom-left with scenario explanation
+        handles_ax, labels_ax = ax.get_legend_handles_labels()
+        handles_ax2, labels_ax2 = ax2.get_legend_handles_labels()
+        scenario_proxy = Line2D([0], [0], color='gray', linewidth=1.0, alpha=0.6,
+                     label='Scenario trajectories (thin lines)')
+        all_handles = handles_ax + handles_ax2 + [scenario_proxy]
+        all_labels = labels_ax + labels_ax2 + [scenario_proxy.get_label()]
+        ax.legend(all_handles, all_labels, loc='lower left')
         plt.tight_layout()
         plt.show()
     

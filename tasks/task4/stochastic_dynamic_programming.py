@@ -17,6 +17,7 @@ import pyomo.environ as pyo
 from pyomo.opt import SolverFactory
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 import time
 from config import Config
 
@@ -330,6 +331,9 @@ def run_sdp(plot=True, summary=True):
     # Expected second-stage discharge and volume (T1+1..T)
     discharge_stage2 = []
     reservoir_stage2 = []
+    # Scenario-specific series for plotting thin lines
+    scenario_discharge = {s: [] for s in solved_val.S}
+    scenario_reservoir = {s: [] for s in solved_val.S}
 
     for t in range(config.T1 + 1, config.T + 1):
         q_exp = 0.0
@@ -338,6 +342,9 @@ def run_sdp(plot=True, summary=True):
             prob_s = pyo.value(solved_val.prob[s])
             q_exp += prob_s * pyo.value(solved_val.q[t, s])
             V_exp += prob_s * pyo.value(solved_val.V[t, s])
+            # store raw scenario values
+            scenario_discharge[s].append(pyo.value(solved_val.q[t, s]))
+            scenario_reservoir[s].append(pyo.value(solved_val.V[t, s]))
         discharge_stage2.append(q_exp)
         reservoir_stage2.append(V_exp)
 
@@ -362,6 +369,8 @@ def run_sdp(plot=True, summary=True):
         "reservoir_all": reservoir_all,
         "hours_q": hours_q,
         "hours_V": hours_V,
+        "scenario_discharge_stage2": scenario_discharge,
+        "scenario_reservoir_stage2": scenario_reservoir,
     }
 
     if summary:
@@ -411,17 +420,35 @@ def create_plots(results):
     hours_V = results["hours_V"]
     q_all = results["discharge_all"]
     V_all = results["reservoir_all"]
+    scenario_q = results.get("scenario_discharge_stage2", {})
+    scenario_V = results.get("scenario_reservoir_stage2", {})
 
     plt.figure(figsize=(11, 4.5))
     ax = plt.gca()
     ax2 = ax.twinx()
 
     # Discharge (primary y-axis)
-    lq, = ax.plot(hours_q, q_all, linewidth=2, label="Discharge q")
+    lq, = ax.plot(hours_q, q_all, linewidth=2, label="Discharge q (expected)")
+    # Scenario-specific discharge lines (second stage only)
+    if scenario_q:
+        hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        first_label_added = False
+        for s, series in scenario_q.items():
+            lbl = "Scenario discharge" if not first_label_added else None
+            ax.plot(hours_stage2, series, color="#1f77b4", alpha=0.4, linewidth=1.0, label=lbl)
+            first_label_added = True
 
     # Reservoir (secondary y-axis)
     lV, = ax2.plot(hours_V, V_all, linestyle="--", linewidth=2,
-                   label="Reservoir V", zorder=3)
+                   label="Reservoir V (expected)", zorder=3)
+    # Scenario-specific reservoir lines (second stage only)
+    if scenario_V:
+        hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        first_label_added_R = False
+        for s, series in scenario_V.items():
+            lbl = "Scenario reservoir" if not first_label_added_R else None
+            ax2.plot(hours_stage2, series, color="#ff7f0e", alpha=0.4, linewidth=1.0, label=lbl)
+            first_label_added_R = True
 
     ax.set_title("SDP — first stage exact; second stage expected", fontweight="bold")
     ax.set_xlabel("Hour")
@@ -432,7 +459,14 @@ def create_plots(results):
     ax.set_xlim(0, config.T)
     ax.axvline(x=config.T1, linestyle=":", alpha=0.7, label="End of first stage")
 
-    ax.legend(handles=[lq, lV], loc="upper left")
+    # Combined legend bottom-left with scenario explanation
+    handles_ax, labels_ax = ax.get_legend_handles_labels()
+    handles_ax2, labels_ax2 = ax2.get_legend_handles_labels()
+    scenario_proxy = Line2D([0], [0], color='gray', linewidth=1.0, alpha=0.6,
+                             label='Scenario trajectories (thin lines)')
+    all_handles = handles_ax + handles_ax2 + [scenario_proxy]
+    all_labels = labels_ax + labels_ax2 + [scenario_proxy.get_label()]
+    ax.legend(all_handles, all_labels, loc='lower left')
     plt.tight_layout()
     plt.show()
 
@@ -456,7 +490,7 @@ def create_plots(results):
         v24_opt = results.get("v24_optimal")
         if v24_opt is not None:
             plt.axvline(v24_opt, color="red", linestyle="--", alpha=0.7, label=f"Optimal V24 = {v24_opt:.3f}")
-            plt.legend(loc="best")
+            plt.legend(loc="lower left")
 
         plt.tight_layout()
         plt.show()

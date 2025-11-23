@@ -3,7 +3,7 @@ This codebase contains the code used to solve the project in TET4565.
 The work was divided into four main tasks, all of which are runnable from this main.py file. 
 """
 
-task1 = True
+task1 = False
 task2 = True
 task3 = True
 task4 = True
