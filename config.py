@@ -69,17 +69,17 @@ class Config:
     # Economic parameters
     @property
     def WV_end(self) -> float:
-        """Water value at end period (NOK/Mm³)."""
+        """Water value at end period (EUR/Mm³)."""
         return self._config_data['economics']['WV_end']
     
     @property
     def spillage_cost(self) -> float:
-        """Cost of spillage (NOK/Mm³)."""
+        """Cost of spillage (EUR/Mm³)."""
         return self._config_data['economics']['spillage_cost']
     
     @property
     def base_price(self) -> float:
-        """Base electricity price (NOK/MWh)."""
+        """Base electricity price (EUR/MWh)."""
         return self._config_data['economics']['base_price']
     
     # Scenario parameters

@@ -3,10 +3,10 @@ This codebase contains the code used to solve the project in TET4565.
 The work was divided into four main tasks, all of which are runnable from this main.py file. 
 """
 
-task1 = False
+task1 = True
 task2 = True
-task3 = False
-task4 = False
+task3 = True
+task4 = True
 
 
 if __name__ == "__main__":
@@ -28,7 +28,11 @@ if __name__ == "__main__":
         run_stochastic_problem(plot=True, summary=True)
     
     if task3:
-        pass
+        # Benders decomposition
+        from tasks.task3.benders_decomposition import run_benders_decomposition
+        run_benders_decomposition(plot=True, summary=True)
     
     if task4:
-        pass
+        # Stochastic Dynamic Programming
+        from tasks.task4.stochastic_dynamic_programming import run_sdp
+        run_sdp(plot=True, summary=True)

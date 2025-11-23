@@ -2,34 +2,35 @@ import numpy as np
 import pandas as pd
 import pyomo.environ as pyo
 import matplotlib.pyplot as plt
+import time
 from config import config
 
 def build_EV_model():
-    """Build Expected Value model using average inflows."""
+    """Expected Value model using average inflows."""
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(1, config.T)
-    m.q = pyo.Var(m.T, bounds=(0, config.q_cap))
-    m.V = pyo.Var(m.T, bounds=(0, config.Vmax))
+    m.q = pyo.Var(m.T, bounds=(0, config.q_cap)) # discharge
+    m.V = pyo.Var(m.T, bounds=(0, config.Vmax)) # reservoir level
+    m.s = pyo.Var(m.T, bounds=(0, None)) # spillage
 
-    # Expected inflow calculation
+    # finding expected average inflow
     I_exp = {}
     for t in range(1, config.T + 1):
         if t <= config.T1:
             I_exp[t] = config.certain_inflow
         else:
-            I_exp[t] = sum(config.scenario_inflows) / len(config.scenario_inflows)
+            I_exp[t] = sum(scenario_inflow * prob for scenario_inflow, prob in zip(config.scenario_inflows, config.scenario_probabilities))
 
-    def res_rule(m, t):
+    def reservoir_balance(m, t):
         if t == 1:
-            return m.V[t] == config.V0 + config.alpha * I_exp[t] - config.alpha * m.q[t]
+            return m.V[t] == config.V0 + config.alpha * I_exp[t] - config.alpha * m.q[t] - config.alpha * m.s[t]
         else:
-            return m.V[t] == m.V[t - 1] + config.alpha * I_exp[t] - config.alpha * m.q[t]
+            return m.V[t] == m.V[t - 1] + config.alpha * I_exp[t] - config.alpha * m.q[t] - config.alpha * m.s[t]
 
-    m.res_balance = pyo.Constraint(m.T, rule=res_rule)
+    m.res_balance = pyo.Constraint(m.T, rule=reservoir_balance)
 
     def obj_rule(m):
         return sum(config.pi[t] * 3.6 * config.E_conv * m.q[t] for t in m.T) + config.WV_end * m.V[config.T]
-    # pi[eur/MWh] * q[m³/s] * E[kWh/m³] *  = (eur*m³*kWh) / (MWh*s*m³)
     m.obj = pyo.Objective(rule=obj_rule, sense=pyo.maximize)
     return m
 
@@ -38,19 +39,28 @@ def run_EV_scenarios(plot=True, summary=True):
     # Build and solve model
     m_ev = build_EV_model()
     solver = config.get_solver()
+    
+    start_time = time.time()
     result = solver.solve(m_ev)
+    solve_time = time.time() - start_time
     
     if summary:
         print("\n" + "="*80)
         print("Expected Value (EV) Model Results")
         print("="*80)
         print(f"Objective value: {pyo.value(m_ev.obj):,.0f} NOK")
+        print(f"Solve time: {solve_time:.3f} seconds")
         
-        # Get discharge profile
-        ev_q = [pyo.value(m_ev.q[t]) for t in range(1, 25)]
-        print(f"First 24h discharge profile:")
-        print("  " + ", ".join(f"{v:6.2f}" for v in ev_q))
-        print(f"Average discharge: {np.mean(ev_q):.2f} m³/s")
+        # Get discharge profile statistics
+        ev_q = [pyo.value(m_ev.q[t]) for t in range(1, config.T + 1)]
+        ev_V = [pyo.value(m_ev.V[t]) for t in range(1, config.T + 1)]
+        ev_s = [pyo.value(m_ev.s[t]) for t in range(1, config.T + 1)]
+        
+        print(f"Discharge statistics:")
+        print(f"  Average: {np.mean(ev_q):.2f} m³/s, Max: {np.max(ev_q):.2f} m³/s, Min: {np.min(ev_q):.2f} m³/s")
+        print(f"Reservoir level:")
+        print(f"  Final: {ev_V[-1]:.2f} Mm³, Max: {np.max(ev_V):.2f} Mm³, Min: {np.min(ev_V):.2f} Mm³")
+        print(f"Total spillage: {np.sum(ev_s):.2f} m³/s·h")
         print("="*80)
     
     if plot:

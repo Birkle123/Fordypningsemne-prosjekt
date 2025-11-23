@@ -19,9 +19,9 @@ conversion:
   
 # Economic parameters
 economics:
-  WV_end: 52600.0    # Water value at end (NOK/Mm³)
-  spillage_cost: 52600.0  # Cost of spillage (NOK/Mm³)
-  base_price: 50.0   # Base electricity price (NOK/MWh)
+  WV_end: 52600.0    # Water value at end (EUR/Mm³)
+  spillage_cost: 52600.0  # Cost of spillage (EUR/Mm³)
+  base_price: 50.0   # Base electricity price (EUR/MWh)
   
 # Scenario parameters
 scenarios:

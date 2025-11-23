@@ -4,14 +4,16 @@ import pyomo.environ as pyo
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from tabulate import tabulate
+import time
 from config import config
 
 def build_scenario_model(scenario_name):
     """Build model for a specific scenario."""
     m = pyo.ConcreteModel()
     m.T = pyo.RangeSet(1, config.T)
-    m.q = pyo.Var(m.T, bounds=(0, config.q_cap))
-    m.V = pyo.Var(m.T, bounds=(0, config.Vmax))
+    m.q = pyo.Var(m.T, bounds=(0, config.q_cap)) # discharge
+    m.V = pyo.Var(m.T, bounds=(0, config.Vmax)) # reservoir level
+    m.s = pyo.Var(m.T, bounds=(0, None))  # spillage
 
     # Get inflow for this scenario
     scenario_inflow = config.scenario_info[scenario_name]
@@ -23,14 +25,16 @@ def build_scenario_model(scenario_name):
             inflow = scenario_inflow
             
         if t == 1:
-            return m.V[t] == config.V0 + config.alpha * inflow - config.alpha * m.q[t]
+            return m.V[t] == config.V0 + config.alpha * inflow - config.alpha * m.q[t] - config.alpha * m.s[t]
         else:
-            return m.V[t] == m.V[t - 1] + config.alpha * inflow - config.alpha * m.q[t]
+            return m.V[t] == m.V[t - 1] + config.alpha * inflow - config.alpha * m.q[t] - config.alpha * m.s[t]
 
     m.res_balance = pyo.Constraint(m.T, rule=res_rule)
 
     def obj_rule(m):
-        return sum(config.pi[t] * 3.6 * config.E_conv * m.q[t] for t in m.T) + config.WV_end * m.V[config.T]
+        revenue = sum(config.pi[t] * 3.6 * config.E_conv * m.q[t] for t in m.T)
+        spillage_cost = sum(config.spillage_cost * m.s[t] * config.alpha for t in m.T)
+        return revenue + config.WV_end * m.V[config.T] - spillage_cost
 
     m.obj = pyo.Objective(rule=obj_rule, sense=pyo.maximize)
     return m
@@ -43,13 +47,16 @@ def run_individual_scenarios(plot=True, summary=True):
     scenario_Vs = {}
     
     # Solve each scenario
+    total_start_time = time.time()
     for scenario_name in config.scenarios:
         m_s = build_scenario_model(scenario_name)
         result = solver.solve(m_s)
         
         obj_val = pyo.value(m_s.obj)
         q_vals = [pyo.value(m_s.q[t]) for t in range(1, 25)]
-        scenario_results.append((scenario_name, config.scenario_info[scenario_name], obj_val, q_vals))
+        s_vals = [pyo.value(m_s.s[t]) for t in range(1, config.T + 1)]
+        s_total = sum(s_vals)
+        scenario_results.append((scenario_name, config.scenario_info[scenario_name], obj_val, q_vals, s_total))
         
         # Store full series for plotting
         scenario_qs[scenario_name] = [pyo.value(m_s.q[t]) for t in range(1, config.T + 1)]
@@ -57,26 +64,29 @@ def run_individual_scenarios(plot=True, summary=True):
     
     if summary:
         print("\n" + "="*80)
+        total_solve_time = time.time() - total_start_time
         print("Individual Scenario Results")
         print("="*80)
+        print(f"Total solve time: {total_solve_time:.3f} seconds ({len(config.scenarios)} scenarios)")
         
         table_data = []
-        for scenario_name, inflow, obj_val, q_vals in scenario_results:
+        for scenario_name, inflow, obj_val, q_vals, s_total in scenario_results:
             table_data.append([
                 scenario_name,
                 f"{inflow:6.1f}",
                 f"{obj_val:,.0f}",
                 f"{np.mean(q_vals):6.2f}",
                 f"{min(q_vals):6.2f}",
-                f"{max(q_vals):6.2f}"
+                f"{max(q_vals):6.2f}",
+                f"{s_total:6.2f}"
             ])
         
-        headers = ["Scenario", "Inflow (m³/s)", "Objective (NOK)", "q avg (m³/s)", "q min", "q max"]
+        headers = ["Scenario", "Inflow (m³/s)", "Objective (NOK)", "q avg (m³/s)", "q min", "q max", "Spillage"]
         print(tabulate(table_data, headers=headers, tablefmt="fancy_grid", stralign="right"))
         
         # Aggregate info
         objs = [r[2] for r in scenario_results]
-        print(f"\nObjective range: {min(objs):,.0f}  →  {max(objs):,.0f}")
+        print(f"\nObjective range: {{ {min(objs):,.0f}    {max(objs):,.0f} }}")
         print(f"Average objective: {np.mean(objs):,.0f}")
         print("="*80)
     
