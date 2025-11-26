@@ -4,8 +4,8 @@ The work was divided into four main tasks, all of which are runnable from this m
 """
 
 task1 = False
-task2 = True
-task3 = True
+task2 = False
+task3 = False
 task4 = True
 
 
@@ -28,11 +28,11 @@ if __name__ == "__main__":
         run_stochastic_problem(plot=True, summary=True)
     
     if task3:
-        # Benders decomposition
+        # Standard Benders decomposition
         from tasks.task3.benders_decomposition import run_benders_decomposition
-        run_benders_decomposition(plot=True, summary=True)
+        run_benders_decomposition(plot=True, summary=True, show_binding_cuts=True)
     
     if task4:
         # Stochastic Dynamic Programming
         from tasks.task4.stochastic_dynamic_programming import run_sdp
-        run_sdp(plot=True, summary=True)
+        run_sdp(plot=True, summary=True, discrete_points = 200)

@@ -19,7 +19,7 @@ def build_benders_master(cuts_data):
     m.s = pyo.Var(m.T, within=pyo.NonNegativeReals, bounds=(0, None))
     
     # Alpha = approximation of second stage profit
-    m.alpha = pyo.Var(within=pyo.Reals, bounds=(-1e6, 1e6))
+    m.a = pyo.Var(within=pyo.Reals, bounds=(-1e6, 1e6))
     
     # Cut information (from cuts_data)
     m.Cut = pyo.Set(initialize=cuts_data["Set"])
@@ -39,65 +39,60 @@ def build_benders_master(cuts_data):
     # Benders cuts
     def benders_cuts(m, c):
         print(f"Cut {c}: α ≤ {m.Phi[c]:.2f} + {m.Lambda[c]:.4f} * (V24 - {m.V24_hat[c]:.3f})")
-        return m.alpha <= m.Phi[c] + m.Lambda[c] * (m.V[config.T1] - m.V24_hat[c])
+        return m.a <= m.Phi[c] + m.Lambda[c] * (m.V[config.T1] - m.V24_hat[c])
     
     m.benders_cuts = pyo.Constraint(m.Cut, rule=benders_cuts)
     
     # Objective = first stage profit + expected second stage profit
     def objective(m):
         first_stage = sum(config.pi[t] * 3.6 * config.E_conv * m.q[t] for t in m.T) - config.spillage_cost * sum(m.s[t] for t in m.T)
-        return first_stage + m.alpha
+        return first_stage + m.a
     
     m.obj = pyo.Objective(rule=objective, sense=pyo.maximize)
     return m
 
 def build_benders_subproblem(V24_hat):
-    """Build Benders subproblem for given V24 value."""
+    """Subproblem with explicit linking variable and equality whose dual gives λ_s."""
     m = pyo.ConcreteModel()
-    
-    # Sets
+
     m.T = pyo.RangeSet(config.T1 + 1, config.T)
     m.S = pyo.Set(initialize=config.scenarios)
-    
-    # Variables - second stage per scenario
+
     m.q = pyo.Var(m.S, m.T, within=pyo.NonNegativeReals, bounds=(0, config.q_cap))
     m.V = pyo.Var(m.S, m.T, within=pyo.NonNegativeReals, bounds=(0, config.Vmax))
     m.s = pyo.Var(m.S, m.T, within=pyo.NonNegativeReals, bounds=(0, None))
-    
-    # Parameter: fixed V24 from master
+
     m.V24_hat = pyo.Param(initialize=V24_hat)
-    
-    # Enable dual information
+    m.V_link = pyo.Var(m.S, within=pyo.NonNegativeReals, bounds=(0, config.Vmax))
+
     m.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
-    
-    # Linking constraint: connects master to subproblem
-    def linking_constraint(m, s):
+
+    def link_rule(m, s):
+        return m.V_link[s] == m.V24_hat
+    m.link_v24 = pyo.Constraint(m.S, rule=link_rule)
+
+    def first_period(m, s):
         inflow = config.scenario_info[s]
-        return m.V[s, config.T1 + 1] == m.V24_hat + config.alpha * inflow - config.alpha * m.q[s, config.T1 + 1] - m.s[s, config.T1 + 1]
-    
-    m.linking = pyo.Constraint(m.S, rule=linking_constraint)
-    
-    # Reservoir balance for remaining periods
+        return m.V[s, config.T1 + 1] == m.V_link[s] + config.alpha * inflow - config.alpha * m.q[s, config.T1 + 1] - m.s[s, config.T1 + 1]
+    m.first_period = pyo.Constraint(m.S, rule=first_period)
+
     def res_balance(m, s, t):
         if t == config.T1 + 1:
             return pyo.Constraint.Skip
         inflow = config.scenario_info[s]
         return m.V[s, t] == m.V[s, t-1] + config.alpha * inflow - config.alpha * m.q[s, t] - m.s[s, t]
-    
     m.res_balance = pyo.Constraint(m.S, m.T, rule=res_balance)
-    
-    # Objective: expected second stage profit
+
     def objective(m):
         total = 0
         for s in m.S:
-            scenario_profit = (
-                sum(config.pi[t] * 3.6 * config.E_conv * m.q[s, t] for t in m.T) 
+            scen_profit = (
+                sum(config.pi[t] * 3.6 * config.E_conv * m.q[s, t] for t in m.T)
                 - config.spillage_cost * sum(m.s[s, t] for t in m.T)
                 + config.WV_end * m.V[s, config.T]
             )
-            total += config.prob[s] * scenario_profit
+            total += config.prob[s] * scen_profit
         return total
-    
     m.obj = pyo.Objective(rule=objective, sense=pyo.maximize)
     return m
 
@@ -107,26 +102,20 @@ def solve_model(model, solver):
     return result, model
 
 def manage_cuts(cuts_data, subproblem_model):
-    """Add new cut based on subproblem solution - following reference pattern."""
-    # Find cut number
+    cheating_factor = 1 #Try to cheat to encourage the primary problem to rely more on the cuts
     cut = len(cuts_data["Set"])
     cuts_data["Set"].append(cut)
-    
-    # Get subproblem objective (Phi)
     cuts_data["Phi"][cut] = pyo.value(subproblem_model.obj)
-    
-    # Get dual information (Lambda) - expected dual across scenarios
-    dual_sum = 0
+    dual_sum = 0.0
     for s in config.scenarios:
-        dual_val = subproblem_model.dual[subproblem_model.linking[s]]
+        dual_val = subproblem_model.dual[subproblem_model.link_v24[s]]
         dual_sum += config.prob[s] * dual_val
-    
-    cuts_data["Lambda"][cut] = dual_sum
+
+    cuts_data["Lambda"][cut] = cheating_factor * dual_sum
     cuts_data["V24_hat"][cut] = pyo.value(subproblem_model.V24_hat)
-    
     return cuts_data
 
-def run_benders_decomposition(plot=True, summary=True):
+def run_benders_decomposition(plot=True, summary=True, show_binding_cuts=True, binding_tol=1e-6):
     """Run Benders decomposition following a clear step-by-step pattern."""
     start_time = time.time()
     
@@ -156,6 +145,8 @@ def run_benders_decomposition(plot=True, summary=True):
     # Track convergence
     upper_bounds = []
     lower_bounds = []
+    global_LB = -float('inf')
+    global_UB = float('inf')
     
     # main benders loop
     for i in range(iterations):
@@ -164,6 +155,8 @@ def run_benders_decomposition(plot=True, summary=True):
         
         # STEP 1: Solve master problem
         master = build_benders_master(cuts_data)
+        # Attach dual suffix to inspect reservoir balance duals
+        master.dual = pyo.Suffix(direction=pyo.Suffix.IMPORT)
         master_result, master = solve_model(master, solver)
         
         if master_result.solver.termination_condition != pyo.TerminationCondition.optimal:
@@ -173,7 +166,7 @@ def run_benders_decomposition(plot=True, summary=True):
         
         # Extract master solution
         V24_solution = pyo.value(master.V[config.T1])
-        alpha_solution = pyo.value(master.alpha)
+        a_solution = pyo.value(master.a)
         master_obj = pyo.value(master.obj)
         
         upper_bounds.append(master_obj)
@@ -182,10 +175,48 @@ def run_benders_decomposition(plot=True, summary=True):
             print(f"Master problem solved:")
             print(f"  Objective: {master_obj:,.2f} NOK")
             print(f"  V24 decision: {V24_solution:.3f} Mm³")
-            print(f"  Alpha estimate: {alpha_solution:,.2f} NOK")
+            print(f"  Alpha estimate: {a_solution:,.2f} NOK")
+            if show_binding_cuts and cuts_data['Set']:
+                print(f"  Cut status (binding_tol={binding_tol:g}):")
+                any_binding = False
+                for c in cuts_data['Set']:
+                    rhs = cuts_data['Phi'][c] + cuts_data['Lambda'][c] * (V24_solution - cuts_data['V24_hat'][c])
+                    slack = a_solution - rhs
+                    is_bind = abs(slack) <= binding_tol
+                    tag = 'BINDING' if is_bind else 'NON-BINDING'
+                    if is_bind:
+                        any_binding = True
+                    print(f"    Cut {c}: slack={slack:.6f} -> {tag}")
+                if not any_binding:
+                    print("    (No binding cuts)")
+            # Variable bound status overview
+            print("  Variable bound status (only reported if at bound or spillage > 0):")
+            any_var = False
+            for t in master.T:
+                qv = pyo.value(master.q[t]); Vv = pyo.value(master.V[t]); sv = pyo.value(master.s[t])
+                q_tag = 'LB' if abs(qv - 0.0) <= 1e-8 else ('UB' if abs(qv - master.q[t].ub) <= 1e-8 else '')
+                V_tag = 'LB' if abs(Vv - 0.0) <= 1e-8 else ('UB' if abs(Vv - master.V[t].ub) <= 1e-8 else '')
+                s_tag = 'SPILL' if sv > 1e-10 else ''
+                if q_tag or V_tag or s_tag:
+                    any_var = True
+                    print(f"    t={t:2d}: q={qv:.3f} {q_tag:>2} | V={Vv:.3f} {V_tag:>2} | s={sv:.5f} {s_tag}")
+            if not any_var:
+                print("    (No variables at bounds; no spillage)")
+            # Reservoir balance duals (shadow water value)
+            if hasattr(master, 'dual'):
+                print("  Reservoir balance duals (shadow water values):")
+                for t in master.T:
+                    dv = master.dual.get(master.res_balance[t], None)
+                    if dv is not None:
+                        print(f"    t={t:2d}: dual={dv:.2f}")
         
         # STEP 2: Solve subproblem with fixed V24
         subproblem = build_benders_subproblem(V24_solution)
+        # Tighten feasibility bound for q at first uncertain period per scenario
+        for s in config.scenarios:
+            inflow = config.scenario_info[s]
+            max_feasible = (V24_solution + config.alpha * inflow) / config.alpha
+            subproblem.q[s, config.T1 + 1].setub(max(0.0, min(config.q_cap, max_feasible)))
         sub_result, subproblem = solve_model(subproblem, solver)
         
         if sub_result.solver.termination_condition != pyo.TerminationCondition.optimal:
@@ -206,6 +237,9 @@ def run_benders_decomposition(plot=True, summary=True):
             print(f"Subproblem solved:")
             print(f"  Second stage profit: {subproblem_obj:,.2f} NOK")
             print(f"  True total objective: {true_obj:,.2f} NOK")
+            for s in config.scenarios:
+                dv = subproblem.dual[subproblem.link_v24[s]]
+                print(f"    Dual(V24 link) [{s}]: {dv:,.4f}")
         
         # STEP 3: Generate new cut
         cuts_data = manage_cuts(cuts_data, subproblem)
@@ -214,15 +248,23 @@ def run_benders_decomposition(plot=True, summary=True):
             cut_num = len(cuts_data["Set"]) - 1
             print(f"Generated cut {cut_num + 1}:")
             print(f"  α ≤ {cuts_data['Phi'][cut_num]:.2f} + {cuts_data['Lambda'][cut_num]:.4f} * (V24 - {cuts_data['V24_hat'][cut_num]:.3f})")
+            # Immediately report slack of new cut at current solution
+            rhs_new = cuts_data['Phi'][cut_num] + cuts_data['Lambda'][cut_num] * (V24_solution - cuts_data['V24_hat'][cut_num])
+            slack_new = a_solution - rhs_new
+            bind_flag = 'BINDING' if abs(slack_new) <= binding_tol else 'NON-BINDING'
+            print(f"  New cut slack: {slack_new:.6f} -> {bind_flag}")
         
         # Check convergence usingr upper bound - lower bound gap
-        gap = abs(master_obj - true_obj)
+        candidate_UB = first_stage_profit + subproblem_obj  # master recourse replaced by exact
+        global_LB = max(global_LB, true_obj)
+        global_UB = min(global_UB, candidate_UB)
+        gap = global_UB - global_LB
         
         if summary:
             print(f"Convergence check:")
-            print(f"  Gap (Upper - Lower): {gap:,.2f}")
-            print(f"  Upper bound (master): {master_obj:,.2f}")
-            print(f"  Lower bound (true): {true_obj:,.2f}")
+            print(f"  Gap (UB - LB): {gap:,.2f}")
+            print(f"  Upper bound (UB): {global_UB:,.2f}")
+            print(f"  Lower bound (LB): {global_LB:,.2f}")
             
             # Check if converged
             tolerance = 1e-8
@@ -242,7 +284,7 @@ def run_benders_decomposition(plot=True, summary=True):
         print(f"Total solve time: {solve_time:.3f} seconds")
         print(f"Iterations completed: {iterations}")
         if lower_bounds:
-            print(f"Final objective estimate: {lower_bounds[-1]:,.2f} NOK")
+            print(f"Final objective (LB): {global_LB:,.2f} NOK")
             print(f"Final V24: {V24_solution:.3f} Mm³")
             print(f"Final gap: {gap:,.2f}")
         print("="*80)
@@ -284,12 +326,17 @@ def run_benders_decomposition(plot=True, summary=True):
         lq, = ax.plot(hours_q, benders_q, color='purple', linewidth=2, label='Discharge q (expected)')
         lV, = ax2.plot(hours_V, benders_V, color='purple', linestyle='--', linewidth=2, label='Reservoir V (expected)', zorder=3)
 
-        # Scenario thin lines (second stage only, unlabeled)
+        # Scenario thin lines (second stage only) with connection at hour T1
         hours_stage2 = list(range(config.T1 + 1, config.T + 1))
-        for s, series in scenario_q.items():
-            ax.plot(hours_stage2, series, color='purple', alpha=0.4, linewidth=1.0)
-        for s, series in scenario_V.items():
-            ax2.plot(hours_stage2, series, color='orange', alpha=0.4, linewidth=1.0)
+        hours_stage2_with_start = [config.T1] + hours_stage2
+        last_q1 = pyo.value(master.q[config.T1])
+        last_V1 = pyo.value(master.V[config.T1])
+        for s in config.scenarios:
+            series_q = [last_q1] + scenario_q[s]
+            ax.plot(hours_stage2_with_start, series_q, color='purple', alpha=0.4, linewidth=1.0)
+        for s in config.scenarios:
+            series_V = [last_V1] + scenario_V[s]
+            ax2.plot(hours_stage2_with_start, series_V, color='orange', alpha=0.4, linewidth=1.0)
         
         ax.set_title('Benders Decomposition — first stage exact; expected & scenario lines on second stage', fontweight='bold')
         ax.set_xlabel('Hour')
@@ -311,10 +358,13 @@ def run_benders_decomposition(plot=True, summary=True):
         plt.show()
     
     return {
-        'objective': lower_bounds[-1] if lower_bounds else None,
+        'objective': global_LB if lower_bounds else None,
         'V24': V24_solution if 'V24_solution' in locals() else None,
         'iterations': iterations,
         'solve_time': solve_time,
         'upper_bounds': upper_bounds,
-        'lower_bounds': lower_bounds
+        'lower_bounds': lower_bounds,
+        'global_UB': global_UB,
+        'global_LB': global_LB,
+        'binding_cuts_last_master': [c for c in cuts_data['Set'] if abs(a_solution - (cuts_data['Phi'][c] + cuts_data['Lambda'][c] * (V24_solution - cuts_data['V24_hat'][c]))) <= binding_tol] if cuts_data['Set'] else []
     }

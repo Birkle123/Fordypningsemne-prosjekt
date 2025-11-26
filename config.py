@@ -134,7 +134,7 @@ class Config:
     @property
     def pi(self) -> Dict[int, float]:
         """Price profile over all time periods (NOK/MWh)."""
-        return {t: self.base_price + t for t in range(1, self.T + 1)}
+        return {t: self.base_price + t * (1) for t in range(1, self.T + 1)}
     
     # Scenario dictionaries
     @property

@@ -118,7 +118,7 @@ def run_stochastic_problem(plot=True, summary=True):
             stoch_q.append(pyo.value(m_stoch.q1[t]))
             stoch_V.append(pyo.value(m_stoch.V1[t]))
 
-        # Scenario-specific second-stage trajectories
+        # Scenario-specific second-stage trajectories (will prepend last first-stage point for continuity)
         scenario_q = {s: [] for s in config.scenarios}
         scenario_V = {s: [] for s in config.scenarios}
 
@@ -144,12 +144,19 @@ def run_stochastic_problem(plot=True, summary=True):
         lq, = ax.plot(hours_q, stoch_q, color='green', linewidth=2, label='Discharge q (expected)')
         lV, = ax2.plot(hours_V, stoch_V, color='green', linestyle='--', linewidth=2, label='Reservoir V (expected)', zorder=3)
 
-        # Scenario thin lines (second stage only, no individual legend labels)
+        # Scenario thin lines (second stage only) with connection at hour T1
         hours_stage2 = list(range(config.T1 + 1, config.T + 1))
-        for s, series in scenario_q.items():
-            ax.plot(hours_stage2, series, color='green', alpha=0.4, linewidth=1.0)
-        for s, series in scenario_V.items():
-            ax2.plot(hours_stage2, series, color='orange', alpha=0.4, linewidth=1.0)
+        hours_stage2_with_start = [config.T1] + hours_stage2
+
+        last_q1 = pyo.value(m_stoch.q1[config.T1])
+        last_V1 = pyo.value(m_stoch.V1[config.T1])
+
+        for s in config.scenarios:
+            series_q = [last_q1] + scenario_q[s]
+            ax.plot(hours_stage2_with_start, series_q, color='green', alpha=0.4, linewidth=1.0)
+        for s in config.scenarios:
+            series_V = [last_V1] + scenario_V[s]
+            ax2.plot(hours_stage2_with_start, series_V, color='orange', alpha=0.4, linewidth=1.0)
 
         ax.set_title('Two-Stage Stochastic Model — shared first stage; expected & scenario lines on day 2', fontweight='bold')
         ax.set_xlabel('Hour')

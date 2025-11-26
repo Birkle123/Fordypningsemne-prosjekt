@@ -209,24 +209,47 @@ def solve_model(model):
     return results, model
 
 def generate_discrete_states(number_of_intervals=500):
-    """
-    Generate discrete V24 values for SDP exploration.
-    
+    """Generate discrete candidate V24 states including endpoints.
+
+    The requested behavior: the grid must always include the lowest (0) and
+    highest (Vmax) reservoir levels. If ``number_of_intervals`` is the number
+    of desired points (states), we construct an evenly spaced grid on
+    [0, Vmax]. If it is less than 2 we fall back to the endpoints logic.
+
+    Example (Vmax=4.5):
+        number_of_intervals = 3  -> [0.0, 2.25, 4.5]
+        number_of_intervals = 5  -> [0.0, 1.125, 2.25, 3.375, 4.5]
+
+    (User example mentioned 2.75 for the middle of 3; that is not an equal
+    spacing. If a non‑uniform mid-point is desired later we can add a custom
+    strategy, but for robustness and cut quality we use uniform spacing.)
+
+    Args:
+        number_of_intervals (int): Number of discrete states to generate (>=2)
+
     Returns:
-        list: Discrete V24 values to evaluate
+        list[float]: Sorted list of unique V24 candidate volumes including 0 and Vmax.
     """
     config = Config()
-    
-    # Create discrete grid for V24
-    # Based on Benders solution (V24=4.16), use a range close to optimal
-    # Use manual points around the known optimal region
-    v24_states = []
-    for v in np.arange(0, 4.5, 4.5/number_of_intervals):
-        v24_states.append(round(v, 2))
-    
-    return list(v24_states)
+    vmax = config.Vmax
+    vmin = 0.0
 
-def run_sdp(plot=True, summary=True):
+    if number_of_intervals <= 1:
+        # Degenerate: only endpoints make sense; return both if >0 range.
+        return [vmin, vmax] if vmax > vmin else [vmin]
+
+    # Use linspace to guarantee inclusion of both endpoints.
+    grid = np.linspace(vmin, vmax, number_of_intervals)
+
+    # Round for nicer printing (avoid excessive duplicates due to floating error)
+    rounded = [round(float(v), 4) for v in grid]
+
+    # Ensure uniqueness and sorted order after rounding
+    unique_sorted = sorted(dict.fromkeys(rounded))
+
+    return unique_sorted
+
+def run_sdp(plot=True, summary=True, discrete_points=500):
     """
     Run Stochastic Dynamic Programming approach.
     
@@ -248,7 +271,7 @@ def run_sdp(plot=True, summary=True):
     config = Config()
     
     # Step 1: Generate discrete states
-    v24_states = generate_discrete_states(number_of_intervals=200)
+    v24_states = generate_discrete_states(number_of_intervals=discrete_points)
     
     # Step 2: Pre-compute all cuts
     cuts_data = {"cuts": []}
@@ -429,25 +452,31 @@ def create_plots(results):
 
     # Discharge (primary y-axis)
     lq, = ax.plot(hours_q, q_all, linewidth=2, label="Discharge q (expected)")
-    # Scenario-specific discharge lines (second stage only)
+    # Scenario-specific discharge lines (second stage only) with connection at hour T1
     if scenario_q:
         hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        hours_stage2_with_start = [config.T1] + hours_stage2
+        last_q1 = results['discharge_stage1'][-1]
         first_label_added = False
         for s, series in scenario_q.items():
             lbl = "Scenario discharge" if not first_label_added else None
-            ax.plot(hours_stage2, series, color="#1f77b4", alpha=0.4, linewidth=1.0, label=lbl)
+            full_series = [last_q1] + series
+            ax.plot(hours_stage2_with_start, full_series, color="#1f77b4", alpha=0.4, linewidth=1.0, label=lbl)
             first_label_added = True
 
     # Reservoir (secondary y-axis)
     lV, = ax2.plot(hours_V, V_all, linestyle="--", linewidth=2,
                    label="Reservoir V (expected)", zorder=3)
-    # Scenario-specific reservoir lines (second stage only)
+    # Scenario-specific reservoir lines (second stage only) with connection at hour T1
     if scenario_V:
         hours_stage2 = list(range(config.T1 + 1, config.T + 1))
+        hours_stage2_with_start = [config.T1] + hours_stage2
+        last_V1 = results['reservoir_stage1'][-1]
         first_label_added_R = False
         for s, series in scenario_V.items():
             lbl = "Scenario reservoir" if not first_label_added_R else None
-            ax2.plot(hours_stage2, series, color="#ff7f0e", alpha=0.4, linewidth=1.0, label=lbl)
+            full_series = [last_V1] + series
+            ax2.plot(hours_stage2_with_start, full_series, color="#ff7f0e", alpha=0.4, linewidth=1.0, label=lbl)
             first_label_added_R = True
 
     ax.set_title("SDP — first stage exact; second stage expected", fontweight="bold")
@@ -480,7 +509,10 @@ def create_plots(results):
         phi_vals = [c["phi"] for c in raw_cuts]
 
         plt.figure(figsize=(10.5, 4.2))
-        plt.plot(v_vals, phi_vals, color="#1f77b4", linewidth=1.6)
+        # Line through pre-computed points
+        plt.plot(v_vals, phi_vals, color="#1f77b4", linewidth=1.6, label="φ(V24) curve")
+        # Dots marking discrete states (pre-computed second-stage solves)
+        plt.scatter(v_vals, phi_vals, color="#d62728", s=24, alpha=0.85, edgecolors='none', label="Pre-computed states")
         plt.title("Second-stage objective value vs starting V24", fontweight="bold")
         plt.xlabel("Starting reservoir volume V24 (Mm³)")
         plt.ylabel("Second-stage objective φ (NOK)")
@@ -490,7 +522,7 @@ def create_plots(results):
         v24_opt = results.get("v24_optimal")
         if v24_opt is not None:
             plt.axvline(v24_opt, color="red", linestyle="--", alpha=0.7, label=f"Optimal V24 = {v24_opt:.3f}")
-            plt.legend(loc="lower left")
+        plt.legend(loc="upper left")
 
         plt.tight_layout()
         plt.show()
