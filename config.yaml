@@ -20,7 +20,7 @@ conversion:
 # Economic parameters
 economics:
   WV_end: 52600.0    # Water value at end (EUR/Mm³)
-  spillage_cost: 52600.0  # Cost of spillage (EUR/Mm³)
+  spillage_cost: 526000.0  # Cost of spillage (EUR/Mm³)
   base_price: 50.0   # Base electricity price (EUR/MWh)
   
 # Scenario parameters
